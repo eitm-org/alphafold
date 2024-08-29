@@ -123,31 +123,7 @@ def get_sequence(fasta_file):
             input_seqs[seq_record.description[index + 6: index + 12]] = seq_record.seq
 
     sequence = str(input_seqs[max(input_seqs)])
-
-    # Following Alphafold formatting for multimer
-    # sequence_2 = ''  #@param {type:"string"}
-    # sequence_3 = ''  #@param {type:"string"}
-    # sequence_4 = ''  #@param {type:"string"}
-    # sequence_5 = ''  #@param {type:"string"}
-    # sequence_6 = ''  #@param {type:"string"}
-    # sequence_7 = ''  #@param {type:"string"}
-    # sequence_8 = ''  #@param {type:"string"}
-    # sequence_9 = ''  #@param {type:"string"}
-    # sequence_10 = ''  #@param {type:"string"}
-    # sequence_11 = ''  #@param {type:"string"}
-    # sequence_12 = ''  #@param {type:"string"}
-    # sequence_13 = ''  #@param {type:"string"}
-    # sequence_14 = ''  #@param {type:"string"}
-    # sequence_15 = ''  #@param {type:"string"}
-    # sequence_16 = ''  #@param {type:"string"}
-    # sequence_17 = ''  #@param {type:"string"}
-    # sequence_18 = ''  #@param {type:"string"}
-    # sequence_19 = ''  #@param {type:"string"}
-    # sequence_20 = ''  #@param {type:"string"}
-
-    input_sequences = (sequence)
-
-    return input_sequences
+    return (sequence,)
 
 # Find the closest source
 ex = futures.ThreadPoolExecutor(3)
@@ -197,11 +173,9 @@ def run(config_file):
         raise RuntimeError('Colab CPU runtime not supported. Change it to GPU via Runtime -> Change Runtime Type -> Hardware accelerator -> GPU.')
     else:
         print(f'Running with {jax.local_devices()[0].device_kind} GPU')
-
-    input_sequences = get_sequence(conf.af2.fasta_paths)
-
+        
     # Validate the input sequences.
-    sequences = input_sequences
+    sequences = get_sequence(conf.af2.fasta_paths)
 
     if len(sequences) == 1:
         print('Using the single-chain model.')
