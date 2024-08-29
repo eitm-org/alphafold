@@ -116,40 +116,36 @@ def get_msa(sequences):
 
 def get_sequence(fasta_file):
     input_seqs = {}
-    
+
     for seq_record in SeqIO.parse(fasta_file, "fasta"):
         if "design" not in seq_record.id: # Skip first sequence ("GGGGG...GGG")
             index = seq_record.description.find("score=")
             input_seqs[seq_record.description[index + 6: index + 12]] = seq_record.seq
 
-    sequence = input_seqs[max(input_seqs)]
+    sequence = str(input_seqs[max(input_seqs)])
 
-    # Following Alphafold formatting :/
-    sequence_2 = ''  #@param {type:"string"}
-    sequence_3 = ''  #@param {type:"string"}
-    sequence_4 = ''  #@param {type:"string"}
-    sequence_5 = ''  #@param {type:"string"}
-    sequence_6 = ''  #@param {type:"string"}
-    sequence_7 = ''  #@param {type:"string"}
-    sequence_8 = ''  #@param {type:"string"}
-    sequence_9 = ''  #@param {type:"string"}
-    sequence_10 = ''  #@param {type:"string"}
-    sequence_11 = ''  #@param {type:"string"}
-    sequence_12 = ''  #@param {type:"string"}
-    sequence_13 = ''  #@param {type:"string"}
-    sequence_14 = ''  #@param {type:"string"}
-    sequence_15 = ''  #@param {type:"string"}
-    sequence_16 = ''  #@param {type:"string"}
-    sequence_17 = ''  #@param {type:"string"}
-    sequence_18 = ''  #@param {type:"string"}
-    sequence_19 = ''  #@param {type:"string"}
-    sequence_20 = ''  #@param {type:"string"}
+    # Following Alphafold formatting for multimer
+    # sequence_2 = ''  #@param {type:"string"}
+    # sequence_3 = ''  #@param {type:"string"}
+    # sequence_4 = ''  #@param {type:"string"}
+    # sequence_5 = ''  #@param {type:"string"}
+    # sequence_6 = ''  #@param {type:"string"}
+    # sequence_7 = ''  #@param {type:"string"}
+    # sequence_8 = ''  #@param {type:"string"}
+    # sequence_9 = ''  #@param {type:"string"}
+    # sequence_10 = ''  #@param {type:"string"}
+    # sequence_11 = ''  #@param {type:"string"}
+    # sequence_12 = ''  #@param {type:"string"}
+    # sequence_13 = ''  #@param {type:"string"}
+    # sequence_14 = ''  #@param {type:"string"}
+    # sequence_15 = ''  #@param {type:"string"}
+    # sequence_16 = ''  #@param {type:"string"}
+    # sequence_17 = ''  #@param {type:"string"}
+    # sequence_18 = ''  #@param {type:"string"}
+    # sequence_19 = ''  #@param {type:"string"}
+    # sequence_20 = ''  #@param {type:"string"}
 
-    input_sequences = (sequence, 
-    sequence_2, sequence_3, sequence_4, sequence_5, 
-    sequence_6, sequence_7, sequence_8, sequence_9, sequence_10,
-    sequence_11, sequence_12, sequence_13, sequence_14, sequence_15, 
-    sequence_16, sequence_17, sequence_18, sequence_19, sequence_20)
+    input_sequences = (sequence)
 
     return input_sequences
 
