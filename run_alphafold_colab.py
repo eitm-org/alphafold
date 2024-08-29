@@ -21,6 +21,7 @@ model_type_to_use = ModelType.MONOMER
 
 test_url_pattern = 'https://storage.googleapis.com/alphafold-colab{:s}/latest/uniref90_2022_01.fasta.1'
 JACKHMMER_BINARY_PATH = ""
+OUTPUT_DIR = ""
 
 MIN_PER_SEQUENCE_LENGTH = 16
 MAX_PER_SEQUENCE_LENGTH = 4000
@@ -88,7 +89,8 @@ def get_msa(sequences):
   sequence_to_fasta_path = {}
   # Deduplicate to not do redundant work for multiple copies of the same chain in homomers.
   for sequence_index, sequence in enumerate(sorted(set(sequences)), 1):
-    fasta_path = f'target_{sequence_index:02d}.fasta'
+    fasta_path = f'/target_{sequence_index:02d}.fasta'
+    fasta_path = OUTPUT_DIR + fasta_path
     with open(fasta_path, 'wt') as f:
       f.write(f'>query\n{sequence}')
     sequence_to_fasta_path[sequence] = fasta_path
@@ -166,6 +168,7 @@ def run(config_file):
 
     PARAMS_PATH = conf.af2.params
     JACKHMMER_BINARY_PATH = conf.af2.hmmer
+    OUTPUT_DIR = conf.af2.output_dir
 
     if jax.local_devices()[0].platform == 'tpu':
         raise RuntimeError('Colab TPU runtime not supported. Change it to GPU via Runtime -> Change Runtime Type -> Hardware accelerator -> GPU.')
@@ -173,7 +176,7 @@ def run(config_file):
         raise RuntimeError('Colab CPU runtime not supported. Change it to GPU via Runtime -> Change Runtime Type -> Hardware accelerator -> GPU.')
     else:
         print(f'Running with {jax.local_devices()[0].device_kind} GPU')
-        
+
     # Validate the input sequences.
     sequences = get_sequence(conf.af2.fasta_paths)
 
@@ -243,9 +246,7 @@ def run(config_file):
 
     # Run the model
     model_names = config.MODEL_PRESETS['monomer'] + ('model_2_ptm',)
-
-    output_dir = conf.af2.output_dir
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     plddts = {}
     ranking_confidences = {}
@@ -317,7 +318,7 @@ def run(config_file):
     to_visualize_pdb = utils.overwrite_b_factors(relaxed_pdb, banded_b_factors)
 
     # Write out the prediction
-    pred_output_path = os.path.join(output_dir, 'selected_prediction.pdb')
+    pred_output_path = os.path.join(OUTPUT_DIR, 'selected_prediction.pdb')
     with open(pred_output_path, 'w') as f:
         f.write(relaxed_pdb)
 
@@ -401,7 +402,7 @@ def run(config_file):
     plt.ylabel('Aligned residue')
 
     # Save the predicted aligned error (if it exists).
-    pae_output_path = os.path.join(output_dir, 'predicted_aligned_error.json')
+    pae_output_path = os.path.join(OUTPUT_DIR, 'predicted_aligned_error.json')
     if pae_outputs:
         # Save predicted aligned error in the same format as the AF EMBL DB.
         pae_data = confidence.pae_json(pae=pae, max_pae=max_pae.item())
