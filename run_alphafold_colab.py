@@ -116,12 +116,13 @@ def get_msa(sequences):
 
 def get_sequence(fasta_file):
     input_seqs = {}
+    
     for seq_record in SeqIO.parse(fasta_file, "fasta"):
         if "design" not in seq_record.id: # Skip first sequence ("GGGGG...GGG")
             index = seq_record.description.find("score=")
             input_seqs[seq_record.description[index + 6: index + 12]] = seq_record.seq
 
-    sequence = str(input_seqs[max(input_seqs)])
+    sequence = input_seqs[max(input_seqs)]
 
     # Following Alphafold formatting :/
     sequence_2 = ''  #@param {type:"string"}
@@ -150,7 +151,7 @@ def get_sequence(fasta_file):
     sequence_11, sequence_12, sequence_13, sequence_14, sequence_15, 
     sequence_16, sequence_17, sequence_18, sequence_19, sequence_20)
 
-    return sequence
+    return input_sequences
 
 # Find the closest source
 ex = futures.ThreadPoolExecutor(3)
