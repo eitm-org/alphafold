@@ -76,7 +76,7 @@ def fetch(source):
   request.urlretrieve(test_url_pattern.format(source))
   return source
 
-def get_msa(sequences):
+def get_msa(sequences, OUTPUT_DIR, JACKHMMER_BINARY_PATH):
   """Searches for MSA for given sequences using chunked Jackhmmer search.
   
   Args:
@@ -206,7 +206,7 @@ def run(config_file):
 
     # Takes about 20 minutes using 1 GPU
     features_for_chain = {}
-    raw_msa_results_for_sequence = get_msa(sequences)
+    raw_msa_results_for_sequence = get_msa(sequences, OUTPUT_DIR, JACKHMMER_BINARY_PATH)
 
     for sequence_index, sequence in enumerate(sequences, start=1):
         raw_msa_results = copy.deepcopy(raw_msa_results_for_sequence[sequence])
