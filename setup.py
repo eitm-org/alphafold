@@ -29,7 +29,7 @@ setup(
     author_email='alphafold@deepmind.com',
     license='Apache License, Version 2.0',
     url='https://github.com/deepmind/alphafold',
-    packages=find_packages(),
+    packages=find_packages(include=['alphafold', 'alphafold.*']),
     install_requires=[
         'absl-py',
         'biopython',
