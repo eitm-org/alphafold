@@ -19,7 +19,7 @@ import os
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import run_alphafold
+import alphafold.run_alphafold_full as run_alphafold_full
 import mock
 import numpy as np
 # Internal import (7716).
@@ -30,8 +30,8 @@ TEST_DATA_DIR = 'alphafold/common/testdata/'
 class RunAlphafoldTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
-      ('relax', run_alphafold.ModelsToRelax.ALL),
-      ('no_relax', run_alphafold.ModelsToRelax.NONE),
+      ('relax', run_alphafold_full.ModelsToRelax.ALL),
+      ('no_relax', run_alphafold_full.ModelsToRelax.NONE),
   )
   def test_end_to_end(self, models_to_relax):
 
@@ -79,7 +79,7 @@ class RunAlphafoldTest(parameterized.TestCase):
       f.write('>A\nAAAAAAAAAAAAA')
     fasta_name = 'test'
 
-    run_alphafold.predict_structure(
+    run_alphafold_full.predict_structure(
         fasta_path=fasta_path,
         fasta_name=fasta_name,
         output_dir_base=out_dir,
@@ -110,7 +110,7 @@ class RunAlphafoldTest(parameterized.TestCase):
         'unrelaxed_model1.cif',
         'unrelaxed_model1.pdb',
     ]
-    if models_to_relax == run_alphafold.ModelsToRelax.ALL:
+    if models_to_relax == run_alphafold_full.ModelsToRelax.ALL:
       expected_files.extend(
           ['relaxed_model1.cif', 'relaxed_model1.pdb', 'relax_metrics.json']
       )
