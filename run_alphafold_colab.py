@@ -13,15 +13,14 @@ import enum
 from alphafold.notebooks import notebook_utils
 
 ### GLOBALS
-PARAMS_PATH = "/boot/"
-test_url_pattern = 'https://storage.googleapis.com/alphafold-colab{:s}/latest/uniref90_2022_01.fasta.1'
-JACKHMMER_BINARY_PATH = "/home/mubale/miniconda3/envs/salt_env/bin/jackhmmer"
-
 # Single sequence entered = monomer model
 @enum.unique
 class ModelType(enum.Enum):
   MONOMER = 0
 model_type_to_use = ModelType.MONOMER
+
+test_url_pattern = 'https://storage.googleapis.com/alphafold-colab{:s}/latest/uniref90_2022_01.fasta.1'
+JACKHMMER_BINARY_PATH = ""
 
 MIN_PER_SEQUENCE_LENGTH = 16
 MAX_PER_SEQUENCE_LENGTH = 4000
@@ -190,6 +189,10 @@ MAX_HITS = {
 }
 
 def run(config_file):
+    conf = OmegaConf.load(config_file)    
+
+    PARAMS_PATH = conf.af2.params
+    JACKHMMER_BINARY_PATH = conf.af2.hmmer
 
     if jax.local_devices()[0].platform == 'tpu':
         raise RuntimeError('Colab TPU runtime not supported. Change it to GPU via Runtime -> Change Runtime Type -> Hardware accelerator -> GPU.')
@@ -198,8 +201,6 @@ def run(config_file):
     else:
         print(f'Running with {jax.local_devices()[0].device_kind} GPU')
 
-
-    conf = OmegaConf.load(config_file)    
     input_sequences = get_sequence(conf.af2.fasta_paths)
 
     # Validate the input sequences.
@@ -272,7 +273,7 @@ def run(config_file):
     # Run the model
     model_names = config.MODEL_PRESETS['monomer'] + ('model_2_ptm',)
 
-    output_dir = 'outputs/prediction'
+    output_dir = conf.af2.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     plddts = {}
