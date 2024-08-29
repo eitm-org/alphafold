@@ -10,7 +10,7 @@ import jax
 import sys
 
 import enum
-from alphafold.alphafold.notebooks import notebook_utils
+from alphafold.notebooks import notebook_utils
 
 ### GLOBALS
 PARAMS_PATH = "/boot/"
@@ -43,20 +43,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import py3Dmol
 
-from alphafold.alphafold.model import model
-from alphafold.alphafold.model import config
-from alphafold.alphafold.model import data
+from alphafold.model import model
+from alphafold.model import config
+from alphafold.model import data
 
-from alphafold.alphafold.data import feature_processing
-from alphafold.alphafold.data import msa_pairing
-from alphafold.alphafold.data import pipeline
-from alphafold.alphafold.data.tools import jackhmmer
+from alphafold.data import feature_processing
+from alphafold.data import msa_pairing
+from alphafold.data import pipeline
+#from alphafold.data import pipeline_multimer
+from alphafold.data.tools import jackhmmer
 
-from alphafold.alphafold.common import confidence
-from alphafold.alphafold.common import protein
+from alphafold.common import confidence
+from alphafold.common import protein
 
-from alphafold.alphafold.relax import relax
-from alphafold.alphafold.relax import utils
+from alphafold.relax import relax
+from alphafold.relax import utils
 
 from IPython import display
 from ipywidgets import GridspecLayout
