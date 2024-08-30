@@ -164,7 +164,7 @@ MAX_HITS = {
 }
 
 def run(config_file):
-    conf = OmegaConf.load(config_file)    
+    conf = config_file
 
     PARAMS_PATH = conf.af2.params
     JACKHMMER_BINARY_PATH = conf.af2.hmmer
