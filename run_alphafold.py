@@ -317,7 +317,7 @@ def run(config_file):
     to_visualize_pdb = utils.overwrite_b_factors(relaxed_pdb, banded_b_factors)
 
     # Write out the prediction
-    pred_output_path = os.path.join(OUTPUT_DIR, 'selected_prediction.pdb')
+    pred_output_path = os.path.join(OUTPUT_DIR, os.path.splitext(OUTPUT_DIR)[0] + '.pdb')
     with open(pred_output_path, 'w') as f:
         f.write(relaxed_pdb)
 
