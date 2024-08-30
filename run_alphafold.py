@@ -169,6 +169,7 @@ def run(config_file):
     PARAMS_PATH = conf.af2.params
     JACKHMMER_BINARY_PATH = conf.af2.hmmer
     OUTPUT_DIR = conf.af2.output_dir
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     if jax.local_devices()[0].platform == 'tpu':
         raise RuntimeError('Colab TPU runtime not supported. Change it to GPU via Runtime -> Change Runtime Type -> Hardware accelerator -> GPU.')
@@ -204,7 +205,6 @@ def run(config_file):
                 f'run out of memory. Total sequence length is {total_sequence_length} '
                 'residues.')
 
-    # Takes about 20 minutes using 1 GPU
     features_for_chain = {}
     raw_msa_results_for_sequence = get_msa(sequences, OUTPUT_DIR, JACKHMMER_BINARY_PATH)
 
@@ -246,7 +246,6 @@ def run(config_file):
 
     # Run the model
     model_names = config.MODEL_PRESETS['monomer'] + ('model_2_ptm',)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     plddts = {}
     ranking_confidences = {}
