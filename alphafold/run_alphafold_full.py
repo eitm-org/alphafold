@@ -388,6 +388,7 @@ def run(conf):
 
   # Check for duplicate FASTA file names.
   fasta_names = [pathlib.Path(p).stem for p in fasta_paths]
+  print(fasta_paths)
   if len(fasta_names) != len(set(fasta_names)):
     raise ValueError('All FASTA paths must have a unique basename.')
 
@@ -473,7 +474,7 @@ def run(conf):
   for i, fasta_path in enumerate(fasta_paths):
     fasta_name = fasta_names[i]
     predict_structure(
-        fasta_path=fasta_path,
+        fasta_path=conf.af2.fasta_paths + fasta_path,
         fasta_name=fasta_name,
         output_dir_base=output_dir,
         data_pipeline=data_pipeline,
@@ -484,4 +485,3 @@ def run(conf):
         models_to_relax=models_to_relax,
         model_type=model_type,
     )
-
