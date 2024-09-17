@@ -21,12 +21,13 @@ import random
 import shutil
 import sys
 import time
-from typing import Dict, Union, Optional
+from typing import Any, Dict, Union
 from omegaconf import OmegaConf
 from datetime import datetime
 
 from absl import app
 from absl import logging
+from alphafold.common import confidence
 from alphafold.common import protein
 from alphafold.common import residue_constants
 from alphafold.data import pipeline
@@ -38,7 +39,9 @@ from alphafold.model import config
 from alphafold.model import data
 from alphafold.model import model
 from alphafold.relax import relax
+import jax.numpy as jnp
 import numpy as np
+import enum
 
 # Internal import (7716).
 logging.set_verbosity(logging.INFO)
@@ -50,6 +53,76 @@ RELAX_STIFFNESS = 10.0
 RELAX_EXCLUDE_RESIDUES = []
 RELAX_MAX_OUTER_ITERATIONS = 3
 
+@enum.unique
+class ModelsToRelax(enum.Enum):
+  ALL = 0
+  BEST = 1
+  NONE = 2
+
+
+def _jnp_to_np(output: Dict[str, Any]) -> Dict[str, Any]:
+  """Recursively changes jax arrays to numpy arrays."""
+  for k, v in output.items():
+    if isinstance(v, dict):
+      output[k] = _jnp_to_np(v)
+    elif isinstance(v, jnp.ndarray):
+      output[k] = np.array(v)
+  return output
+
+def _save_confidence_json_file(
+    plddt: np.ndarray, output_dir: str, model_name: str
+) -> None:
+  confidence_json = confidence.confidence_json(plddt)
+
+  # Save the confidence json.
+  confidence_json_output_path = os.path.join(
+      output_dir, f'confidence_{model_name}.json'
+  )
+  with open(confidence_json_output_path, 'w') as f:
+    f.write(confidence_json)
+
+def _save_mmcif_file(
+    prot: protein.Protein,
+    output_dir: str,
+    model_name: str,
+    file_id: str,
+    model_type: str,
+) -> None:
+  """Crate mmCIF string and save to a file.
+
+  Args:
+    prot: Protein object.
+    output_dir: Directory to which files are saved.
+    model_name: Name of a model.
+    file_id: The file ID (usually the PDB ID) to be used in the mmCIF.
+    model_type: Monomer or multimer.
+  """
+
+  mmcif_string = protein.to_mmcif(prot, file_id, model_type)
+
+  # Save the MMCIF.
+  mmcif_output_path = os.path.join(output_dir, f'{model_name}.cif')
+  with open(mmcif_output_path, 'w') as f:
+    f.write(mmcif_string)
+
+def _save_pae_json_file(
+    pae: np.ndarray, max_pae: float, output_dir: str, model_name: str
+) -> None:
+  """Check prediction result for PAE data and save to a JSON file if present.
+
+  Args:
+    pae: The n_res x n_res PAE array.
+    max_pae: The maximum possible PAE value.
+    output_dir: Directory to which files are saved.
+    model_name: Name of a model.
+  """
+  pae_json = confidence.pae_json(pae, max_pae)
+
+  # Save the PAE json.
+  pae_json_output_path = os.path.join(output_dir, f'pae_{model_name}.json')
+  with open(pae_json_output_path, 'w') as f:
+    f.write(pae_json)
+
 def predict_structure(
     fasta_path: str,
     fasta_name: str,
@@ -59,7 +132,9 @@ def predict_structure(
     amber_relaxer: relax.AmberRelaxation,
     benchmark: bool,
     random_seed: int,
-    is_prokaryote: Optional[bool] = None):
+    models_to_relax: ModelsToRelax,
+    model_type: str,
+):
   """Predicts structure using AlphaFold for the given sequence."""
   logging.info('Predicting %s', fasta_name)
   timings = {}
@@ -70,25 +145,11 @@ def predict_structure(
   if not os.path.exists(msa_output_dir):
     os.makedirs(msa_output_dir)
 
-  # Get features, loading them from storage if they have already been saved to storage.
+  # Get features.
   t_0 = time.time()
-  features_output_path = os.path.join(output_dir, 'features.pkl')
-  if os.path.isfile(features_output_path):
-      with open(features_output_path, 'rb') as f:
-          feature_dict = pickle.load(f)
-  else:
-      if is_prokaryote is None:
-          feature_dict = data_pipeline.process(
-              input_fasta_path=fasta_path,
-              msa_output_dir=msa_output_dir)
-      else:
-          feature_dict = data_pipeline.process(
-              input_fasta_path=fasta_path,
-              msa_output_dir=msa_output_dir,
-              is_prokaryote=is_prokaryote)
-      # Write out features as a pickled dictionary.
-      with open(features_output_path, 'wb') as f:
-          pickle.dump(feature_dict, f, protocol=4)
+  feature_dict = data_pipeline.process(
+      input_fasta_path=fasta_path,
+      msa_output_dir=msa_output_dir)
   timings['features'] = time.time() - t_0
 
   # Write out features as a pickled dictionary.
@@ -97,94 +158,150 @@ def predict_structure(
     pickle.dump(feature_dict, f, protocol=4)
 
   unrelaxed_pdbs = {}
+  unrelaxed_proteins = {}
   relaxed_pdbs = {}
+  relax_metrics = {}
   ranking_confidences = {}
 
-  # Run the models, ignoring FASTA files for which relaxed structures have already been predicted.
+  # Run the models.
   num_models = len(model_runners)
   for model_index, (model_name, model_runner) in enumerate(
       model_runners.items()):
     logging.info('Running model %s on %s', model_name, fasta_name)
     t_0 = time.time()
-    relaxed_output_path = os.path.join(output_dir, f'relaxed_{model_name}.pdb')
-    if not os.path.isfile(relaxed_output_path):
-        model_random_seed = model_index + random_seed * num_models
-        processed_feature_dict = model_runner.process_features(
-            feature_dict, random_seed=model_random_seed)
-        timings[f'process_features_{model_name}'] = time.time() - t_0
+    model_random_seed = model_index + random_seed * num_models
+    processed_feature_dict = model_runner.process_features(
+        feature_dict, random_seed=model_random_seed)
+    timings[f'process_features_{model_name}'] = time.time() - t_0
 
-        t_0 = time.time()
-        prediction_result = model_runner.predict(processed_feature_dict,
-                                                 random_seed=model_random_seed)
-        t_diff = time.time() - t_0
-        timings[f'predict_and_compile_{model_name}'] = t_diff
-        logging.info(
-            'Total JAX model %s on %s predict time (includes compilation time, see --benchmark): %.1fs',
-            model_name, fasta_name, t_diff)
+    t_0 = time.time()
+    prediction_result = model_runner.predict(processed_feature_dict,
+                                             random_seed=model_random_seed)
+    t_diff = time.time() - t_0
+    timings[f'predict_and_compile_{model_name}'] = t_diff
+    logging.info(
+        'Total JAX model %s on %s predict time (includes compilation time, see --benchmark): %.1fs',
+        model_name, fasta_name, t_diff)
 
-        if benchmark:
-          t_0 = time.time()
-          model_runner.predict(processed_feature_dict,
-                               random_seed=model_random_seed)
-          t_diff = time.time() - t_0
-          timings[f'predict_benchmark_{model_name}'] = t_diff
-          logging.info(
-              'Total JAX model %s on %s predict time (excludes compilation time): %.1fs',
-              model_name, fasta_name, t_diff)
+    if benchmark:
+      t_0 = time.time()
+      model_runner.predict(processed_feature_dict,
+                           random_seed=model_random_seed)
+      t_diff = time.time() - t_0
+      timings[f'predict_benchmark_{model_name}'] = t_diff
+      logging.info(
+          'Total JAX model %s on %s predict time (excludes compilation time): %.1fs',
+          model_name, fasta_name, t_diff)
 
-        plddt = prediction_result['plddt']
-        ranking_confidences[model_name] = prediction_result['ranking_confidence']
+    plddt = prediction_result['plddt']
+    _save_confidence_json_file(plddt, output_dir, model_name)
+    ranking_confidences[model_name] = prediction_result['ranking_confidence']
 
-        # Save the model outputs.
-        result_output_path = os.path.join(output_dir, f'result_{model_name}.pkl')
-        with open(result_output_path, 'wb') as f:
-          pickle.dump(prediction_result, f, protocol=4)
+    if (
+        'predicted_aligned_error' in prediction_result
+        and 'max_predicted_aligned_error' in prediction_result
+    ):
+      pae = prediction_result['predicted_aligned_error']
+      max_pae = prediction_result['max_predicted_aligned_error']
+      _save_pae_json_file(pae, float(max_pae), output_dir, model_name)
 
-        # Add the predicted LDDT in the b-factor column.
-        # Note that higher predicted LDDT value means higher model confidence.
-        plddt_b_factors = np.repeat(
-            plddt[:, None], residue_constants.atom_type_num, axis=-1)
-        unrelaxed_protein = protein.from_prediction(
-            features=processed_feature_dict,
-            result=prediction_result,
-            b_factors=plddt_b_factors,
-            remove_leading_feature_dimension=not model_runner.multimer_mode)
+    # Remove jax dependency from results.
+    np_prediction_result = _jnp_to_np(dict(prediction_result))
 
-        unrelaxed_pdbs[model_name] = protein.to_pdb(unrelaxed_protein)
-        unrelaxed_pdb_path = os.path.join(output_dir, f'unrelaxed_{model_name}.pdb')
-        with open(unrelaxed_pdb_path, 'w') as f:
-          f.write(unrelaxed_pdbs[model_name])
+    # Save the model outputs.
+    result_output_path = os.path.join(output_dir, f'result_{model_name}.pkl')
+    with open(result_output_path, 'wb') as f:
+      pickle.dump(np_prediction_result, f, protocol=4)
 
-        if amber_relaxer:
-          # Relax the prediction.
-          t_0 = time.time()
-          relaxed_pdb_str, _, _ = amber_relaxer.process(prot=unrelaxed_protein)
-          timings[f'relax_{model_name}'] = time.time() - t_0
+    # Add the predicted LDDT in the b-factor column.
+    # Note that higher predicted LDDT value means higher model confidence.
+    plddt_b_factors = np.repeat(
+        plddt[:, None], residue_constants.atom_type_num, axis=-1)
+    unrelaxed_protein = protein.from_prediction(
+        features=processed_feature_dict,
+        result=prediction_result,
+        b_factors=plddt_b_factors,
+        remove_leading_feature_dimension=not model_runner.multimer_mode)
 
-          relaxed_pdbs[model_name] = relaxed_pdb_str
+    unrelaxed_proteins[model_name] = unrelaxed_protein
+    unrelaxed_pdbs[model_name] = protein.to_pdb(unrelaxed_protein)
+    unrelaxed_pdb_path = os.path.join(output_dir, f'unrelaxed_{model_name}.pdb')
+    with open(unrelaxed_pdb_path, 'w') as f:
+      f.write(unrelaxed_pdbs[model_name])
 
-          # Save the relaxed PDB.
-          relaxed_output_path = os.path.join(
-              output_dir, f'relaxed_{model_name}.pdb')
-          with open(relaxed_output_path, 'w') as f:
-            f.write(relaxed_pdb_str)
+    _save_mmcif_file(
+        prot=unrelaxed_protein,
+        output_dir=output_dir,
+        model_name=f'unrelaxed_{model_name}',
+        file_id=str(model_index),
+        model_type=model_type,
+    )
 
-  # Rank by model confidence and write out relaxed PDBs in rank order.
-  ranked_order = []
-  for idx, (model_name, _) in enumerate(
-      sorted(ranking_confidences.items(), key=lambda x: x[1], reverse=True)):
-    ranked_order.append(model_name)
+  # Rank by model confidence.
+  ranked_order = [
+      model_name for model_name, confidence in
+      sorted(ranking_confidences.items(), key=lambda x: x[1], reverse=True)]
+
+  # Relax predictions.
+  if models_to_relax == ModelsToRelax.BEST:
+    to_relax = [ranked_order[0]]
+  elif models_to_relax == ModelsToRelax.ALL:
+    to_relax = ranked_order
+  elif models_to_relax == ModelsToRelax.NONE:
+    to_relax = []
+
+  for model_name in to_relax:
+    t_0 = time.time()
+    relaxed_pdb_str, _, violations = amber_relaxer.process(
+        prot=unrelaxed_proteins[model_name])
+    relax_metrics[model_name] = {
+        'remaining_violations': violations,
+        'remaining_violations_count': sum(violations)
+    }
+    timings[f'relax_{model_name}'] = time.time() - t_0
+
+    relaxed_pdbs[model_name] = relaxed_pdb_str
+
+    # Save the relaxed PDB.
+    relaxed_output_path = os.path.join(
+        output_dir, f'relaxed_{model_name}.pdb')
+    with open(relaxed_output_path, 'w') as f:
+      f.write(relaxed_pdb_str)
+
+    relaxed_protein = protein.from_pdb_string(relaxed_pdb_str)
+    _save_mmcif_file(
+        prot=relaxed_protein,
+        output_dir=output_dir,
+        model_name=f'relaxed_{model_name}',
+        file_id='0',
+        model_type=model_type,
+    )
+
+  # Write out relaxed PDBs in rank order.
+  for idx, model_name in enumerate(ranked_order):
     ranked_output_path = os.path.join(output_dir, f'ranked_{idx}.pdb')
     with open(ranked_output_path, 'w') as f:
-      if amber_relaxer:
+      if model_name in relaxed_pdbs:
         f.write(relaxed_pdbs[model_name])
       else:
         f.write(unrelaxed_pdbs[model_name])
 
+    if model_name in relaxed_pdbs:
+      protein_instance = protein.from_pdb_string(relaxed_pdbs[model_name])
+    else:
+      protein_instance = protein.from_pdb_string(unrelaxed_pdbs[model_name])
+
+    _save_mmcif_file(
+        prot=protein_instance,
+        output_dir=output_dir,
+        model_name=f'ranked_{idx}',
+        file_id=str(idx),
+        model_type=model_type,
+    )
+
   ranking_output_path = os.path.join(output_dir, 'ranking_debug.json')
   with open(ranking_output_path, 'w') as f:
-    # Use the multimer flag as a proxy for determining whether the model(s) predicted TM-scores.
-    label = 'iptm+ptm' if 'multimer' in model_preset else 'plddts'
+    label = 'iptm+ptm' if 'iptm' in prediction_result else 'plddts'
     f.write(json.dumps(
         {label: ranking_confidences, 'order': ranked_order}, indent=4))
 
@@ -193,20 +310,13 @@ def predict_structure(
   timings_output_path = os.path.join(output_dir, 'timings.json')
   with open(timings_output_path, 'w') as f:
     f.write(json.dumps(timings, indent=4))
-
-  if remove_msas_after_use:
-      # Remove MSAs' .sto files after using them for structure prediction(s), to significantly free up storage space
-      msa_extensions_to_remove = ['.sto']
-      for root_dir, dir_names, filenames in os.walk(msa_output_dir):
-          for filename in filenames:
-              if filename.endswith(msa_extensions_to_remove):
-                  try:
-                      os.remove(os.path.join(root_dir, filename))
-                  except OSError:
-                      logging.info(f'Error while deleting MSA file {os.path.join(root_dir, filename)}')
+  if models_to_relax != ModelsToRelax.NONE:
+    relax_metrics_path = os.path.join(output_dir, 'relax_metrics.json')
+    with open(relax_metrics_path, 'w') as f:
+      f.write(json.dumps(relax_metrics, indent=4))
+      
 
 def run(config_file):
-
   conf = OmegaConf.load(config_file)
 
   # PRESETS
@@ -233,37 +343,44 @@ def run(config_file):
   template_mmcif_dir = data_dir + conf.af2.pdb_mmcif
   obsolete_pdbs_path = data_dir + conf.af2.obs_pdbs
 
-  uniclust30_database_path = None
+  uniref30_database_path = None
   small_bfd_database_path = None
   bfd_database_path = None
-  uniprot_database_path = None
-  pdb_seqres_database_path = None
 
   # MODEL SPECIFICATION
   max_template_date = datetime.today().strftime('%Y-%m-%d')
-  is_prokaryote_list = None
   benchmark = False
   random_seed = None
   use_precomputed_msas = False
-  remove_msas_after_use = False
-  run_relax = True
   use_gpu_relax = None
-  run_multimer_system = False
+  model_type = 'Monomer'
 
-  for tool_name in ('jackhmmer', 'hhblits', 'hhsearch', 'hmmsearch', 'hmmbuild', 'kalign'):
-    if not [f'{tool_name}'].value:
+  # multimer pipeline 
+  run_multimer_system = False 
+  num_multimer_predictions_per_model = 0
+  uniprot_database_path = None
+  pdb_seqres_database_path = None
+
+  if conf.af2.relax == 'BEST':
+    models_to_relax = ModelsToRelax.BEST
+  elif conf.af2.relax == 'NONE':
+    models_to_relax = ModelsToRelax.NONE
+  else:
+    models_to_relax = ModelsToRelax.ALL
+
+  for tool_name in (
+      'jackhmmer', 'hhblits', 'hhsearch', 'hmmsearch', 'hmmbuild', 'kalign'):
+    if not [f'{tool_name}_binary_path'].value:
       raise ValueError(f'Could not find path to the "{tool_name}" binary. Make '
-                        'sure it is installed on your system.')
-
-  use_small_bfd = db_preset == 'reduced_dbs'
+                       'sure it is installed on your system.')
+  
+  use_small_bfd = (db_preset == 'reduced_dbs')
 
   if use_small_bfd:
-     small_bfd_database_path = data_dir + conf.af2.small_bfd
+    small_bfd_database_path = conf.af2.small_bfd
   else:
-    bfd_database_path = data_dir + conf.af2.bfd
-    uniclust30_database_path = data_dir + conf.af2.uniref30
-    uniprot_database_path = data_dir + conf.af2.uniprot
-    pdb_seqres_database_path = data_dir + conf.af2.pdb_seqres
+    uniref30_database_path = conf.af2.uniref30
+    bfd_database_path = conf.af2.bfd
 
   if model_preset == 'monomer_casp14':
     num_ensemble = 8
@@ -274,22 +391,6 @@ def run(config_file):
   fasta_names = [pathlib.Path(p).stem for p in fasta_paths]
   if len(fasta_names) != len(set(fasta_names)):
     raise ValueError('All FASTA paths must have a unique basename.')
-
-  # Check that is_prokaryote_list has same number of elements as fasta_paths,
-  # and convert to bool.
-  if is_prokaryote_list:
-    if len(is_prokaryote_list) != len(fasta_paths):
-      raise ValueError('--is_prokaryote_list must either be omitted or match '
-                       'length of --fasta_paths.')
-    is_prokaryote_list = []
-    for s in is_prokaryote_list:
-      if s in ('true', 'false'):
-        is_prokaryote_list.append(s == 'true')
-      else:
-        raise ValueError('--is_prokaryote_list must contain comma separated '
-                         'true or false values.')
-  else:  # Default is_prokaryote to False.
-    is_prokaryote_list = [False] * len(fasta_names)
 
   if run_multimer_system:
     template_searcher = hmmsearch.Hmmsearch(
@@ -321,7 +422,7 @@ def run(config_file):
       uniref90_database_path=uniref90_database_path,
       mgnify_database_path=mgnify_database_path,
       bfd_database_path=bfd_database_path,
-      uniclust30_database_path=uniclust30_database_path,
+      uniref30_database_path=uniref30_database_path,
       small_bfd_database_path=small_bfd_database_path,
       template_searcher=template_searcher,
       template_featurizer=template_featurizer,
@@ -329,12 +430,14 @@ def run(config_file):
       use_precomputed_msas=use_precomputed_msas)
 
   if run_multimer_system:
+    num_predictions_per_model = num_multimer_predictions_per_model
     data_pipeline = pipeline_multimer.DataPipeline(
         monomer_data_pipeline=monomer_data_pipeline,
         jackhmmer_binary_path=jackhmmer_binary_path,
         uniprot_database_path=uniprot_database_path,
         use_precomputed_msas=use_precomputed_msas)
   else:
+    num_predictions_per_model = 1
     data_pipeline = monomer_data_pipeline
 
   model_runners = {}
@@ -348,30 +451,27 @@ def run(config_file):
     model_params = data.get_model_haiku_params(
         model_name=model_name, data_dir=data_dir)
     model_runner = model.RunModel(model_config, model_params)
-    model_runners[model_name] = model_runner
+    for i in range(num_predictions_per_model):
+      model_runners[f'{model_name}_pred_{i}'] = model_runner
 
   logging.info('Have %d models: %s', len(model_runners),
                list(model_runners.keys()))
 
-  if run_relax:
-    amber_relaxer = relax.AmberRelaxation(
-        max_iterations=RELAX_MAX_ITERATIONS,
-        tolerance=RELAX_ENERGY_TOLERANCE,
-        stiffness=RELAX_STIFFNESS,
-        exclude_residues=RELAX_EXCLUDE_RESIDUES,
-        max_outer_iterations=RELAX_MAX_OUTER_ITERATIONS,
-        use_gpu=use_gpu_relax)
-  else:
-    amber_relaxer = None
+  amber_relaxer = relax.AmberRelaxation(
+      max_iterations=RELAX_MAX_ITERATIONS,
+      tolerance=RELAX_ENERGY_TOLERANCE,
+      stiffness=RELAX_STIFFNESS,
+      exclude_residues=RELAX_EXCLUDE_RESIDUES,
+      max_outer_iterations=RELAX_MAX_OUTER_ITERATIONS,
+      use_gpu=use_gpu_relax)
 
   random_seed = random_seed
   if random_seed is None:
-    random_seed = random.randrange(sys.maxsize // len(model_names))
+    random_seed = random.randrange(sys.maxsize // len(model_runners))
   logging.info('Using random seed %d for the data pipeline', random_seed)
 
   # Predict structure for each of the sequences.
   for i, fasta_path in enumerate(fasta_paths):
-    is_prokaryote = is_prokaryote_list[i] if run_multimer_system else None
     fasta_name = fasta_names[i]
     predict_structure(
         fasta_path=fasta_path,
@@ -382,4 +482,6 @@ def run(config_file):
         amber_relaxer=amber_relaxer,
         benchmark=benchmark,
         random_seed=random_seed,
-        is_prokaryote=is_prokaryote)
+        models_to_relax=models_to_relax,
+        model_type=model_type,
+    )
