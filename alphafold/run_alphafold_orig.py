@@ -1,8 +1,3 @@
-
-
-
-
-
 # Copyright 2021 DeepMind Technologies Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -502,4 +497,4 @@ def main(config_file):
         random_seed=random_seed,
         is_prokaryote=is_prokaryote)
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
