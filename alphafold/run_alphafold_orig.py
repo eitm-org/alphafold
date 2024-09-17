@@ -1,3 +1,8 @@
+
+
+
+
+
 # Copyright 2021 DeepMind Technologies Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,34 +51,65 @@ import numpy as np
 logging.set_verbosity(logging.INFO)
 FLAGS = flags.FLAGS
 
+def set_vars(config_file):
+  
+  conf = OmegaConf.load(config_file)
+
+  ''' Paths to FASTA files, each containing a prediction target that will be folded 
+    one after another. If a FASTA file contains multiple sequences, then it will 
+    be folded as a multimer. Paths should be separated by commas. All FASTA paths 
+    must have a unique basename as the basename is used to name the output directories 
+    for each prediction. '''
+  fasta_paths = conf.af2.fasta_paths
+  data_dir = conf.af2.data_dir
+  output_dir = conf.af2.output_dir
+
+  jackhmmer_binary_path = shutil.which('jackhmmer')
+  hhblits_binary_path = shutil.which('hhblits')
+  hhsearch_binary_path = shutil.which('hhsearch')
+  hmmsearch_binary_path = shutil.which('hmmsearch')
+  hmmbuild_binary_path = shutil.which('hmmbuild')
+  kalign_binary_path = shutil.which('kalign')
+  uniref90_database_path = conf.af2.uniref90
+  mgnify_database_path = conf.af2.mgnify
+  bfd_database_path = conf.af2.bfd
+  small_bfd_database_path = conf.af2.small_bfd
+  uniclust30_database_path = None
+  uniprot_database_path = None
+  pdb70_database_path = conf.af2.pdb70
+  pdb_seqres_database_path = None
+  template_mmcif_dir = None
+  max_template_date = datetime.today().strftime('%Y-%m-%d')
+  obsolete_pdbs_path = None
+  db_preset = conf.af2.db_preset
+  model_preset = conf.af2.model_preset
+  benchmark = False
+  random_seed = None
+  use_precomputed_msas = False
+  remove_msas_after_use = False
+  run_relax = True
+  use_gpu_relax = None
+
 def set_flags(config_file):
 
   conf = OmegaConf.load(config_file)
 
-  ## USER SPECIFIC LOCATIONS
   flags.DEFINE_list(
       'fasta_paths', conf.af2.fasta_paths, 'Paths to FASTA files, each containing a prediction '
       'target that will be folded one after another. If a FASTA file contains '
       'multiple sequences, then it will be folded as a multimer. Paths should be '
       'separated by commas. All FASTA paths must have a unique basename as the '
       'basename is used to name the output directories for each prediction.')
+  flags.DEFINE_list(
+      'is_prokaryote_list', None, 'Optional for multimer system, not used by the '
+      'single chain system. This list should contain a boolean for each fasta '
+      'specifying true where the target complex is from a prokaryote, and false '
+      'where it is not, or where the origin is unknown. These values determine '
+      'the pairing method for the MSA.')
+
   flags.DEFINE_string('data_dir', conf.af2.data_dir, 'Path to directory of supporting data.')
   flags.DEFINE_string('output_dir', conf.af2.output_dir, 'Path to a directory that will '
                       'store the results.')
-
-  ## PRESETS
-  flags.DEFINE_enum('db_preset', conf.af2.db_preset,
-                  ['full_dbs', 'reduced_dbs'],
-                  'Choose preset MSA database configuration - '
-                  'smaller genetic database config (reduced_dbs) or '
-                  'full genetic database config  (full_dbs)')
-  flags.DEFINE_enum('model_preset', conf.af2.model_preset,
-                    ['monomer', 'monomer_casp14', 'monomer_ptm', 'multimer'],
-                    'Choose preset model configuration - the monomer model, '
-                    'the monomer model with extra ensembling, monomer model with '
-                    'pTM head, or multimer model')
-  
-  ## BINARY PATHS
   flags.DEFINE_string('jackhmmer_binary_path', shutil.which('jackhmmer'),
                       'Path to the JackHMMER executable.')
   flags.DEFINE_string('hhblits_binary_path', shutil.which('hhblits'),
@@ -86,9 +122,6 @@ def set_flags(config_file):
                       'Path to the hmmbuild executable.')
   flags.DEFINE_string('kalign_binary_path', shutil.which('kalign'),
                       'Path to the Kalign executable.')
-  
-
-  ## DATABASES
   flags.DEFINE_string('uniref90_database_path', conf.af2.uniref90, 'Path to the Uniref90 '
                       'database for use by JackHMMER.')
   flags.DEFINE_string('mgnify_database_path', conf.af2.mgnify, 'Path to the MGnify '
@@ -112,10 +145,16 @@ def set_flags(config_file):
   flags.DEFINE_string('obsolete_pdbs_path', None, 'Path to file containing a '
                       'mapping from obsolete PDB IDs to the PDB IDs of their '
                       'replacements.')
-  flags.DEFINE_string('small_bfd_database_path', conf.af2.small_bfd, 'Path to the small '
-                      'version of BFD used with the "reduced_dbs" preset.')
-
-  ## MODEL CONFIGURATION
+  flags.DEFINE_enum('db_preset', conf.af2.db_preset,
+                    ['full_dbs', 'reduced_dbs'],
+                    'Choose preset MSA database configuration - '
+                    'smaller genetic database config (reduced_dbs) or '
+                    'full genetic database config  (full_dbs)')
+  flags.DEFINE_enum('model_preset', conf.af2.model_preset,
+                    ['monomer', 'monomer_casp14', 'monomer_ptm', 'multimer'],
+                    'Choose preset model configuration - the monomer model, '
+                    'the monomer model with extra ensembling, monomer model with '
+                    'pTM head, or multimer model')
   flags.DEFINE_boolean('benchmark', False, 'Run multiple JAX model evaluations '
                       'to obtain a timing that excludes the compilation time, '
                       'which should be more indicative of the time required for '
@@ -144,12 +183,6 @@ def set_flags(config_file):
                       'Relax on GPU can be much faster than CPU, so it is '
                       'recommended to enable if possible. GPUs must be available'
                       ' if this setting is enabled.')
-  flags.DEFINE_list(
-    'is_prokaryote_list', None, 'Optional for multimer system, not used by the '
-    'single chain system. This list should contain a boolean for each fasta '
-    'specifying true where the target complex is from a prokaryote, and false '
-    'where it is not, or where the origin is unknown. These values determine '
-    'the pairing method for the MSA.')
   
 MAX_TEMPLATE_HITS = 20
 RELAX_MAX_ITERATIONS = 0
@@ -319,19 +352,21 @@ def predict_structure(
                   try:
                       os.remove(os.path.join(root_dir, filename))
                   except OSError:
-                      logging.info(f'Error while deleting MSA file {os.path.join(root_dir, filename)}')
+                      logging.info(f'Error while deleting MSA file {os.path.join(root, filename)}')
 
-def run(config_file):
-
+def main(config_file):
+  FLAGS = flags.FLAGS 
   set_flags(config_file=config_file)
-  FLAGS = flags.FLAGS
-  FLAGS(sys.argv[1:])
 
-  for tool_name in ('jackhmmer', 'hhblits', 'hhsearch', 'hmmsearch', 'hmmbuild', 'kalign'):
-    if not FLAGS[f'{tool_name}'].value:
+  print(FLAGS)
+
+  for tool_name in (
+      'jackhmmer', 'hhblits', 'hhsearch', 'hmmsearch', 'hmmbuild', 'kalign'):
+    if not FLAGS[f'{tool_name}_binary_path'].value:
       raise ValueError(f'Could not find path to the "{tool_name}" binary. Make '
-                        'sure it is installed on your system.')
+                       'sure it is installed on your system.')
 
+  FLAGS(sys.argv)
   use_small_bfd = FLAGS.db_preset == 'reduced_dbs'
   _check_flag('small_bfd_database_path', 'db_preset',
               should_be_set=use_small_bfd)
@@ -339,8 +374,8 @@ def run(config_file):
               should_be_set=not use_small_bfd)
   _check_flag('uniclust30_database_path', 'db_preset',
               should_be_set=not use_small_bfd)
-
-  run_multimer_system = 'multimer' in FLAGS.model_preset
+  
+  run_multimer_system = False
   _check_flag('pdb70_database_path', 'model_preset',
               should_be_set=not run_multimer_system)
   _check_flag('pdb_seqres_database_path', 'model_preset',
@@ -467,17 +502,4 @@ def run(config_file):
         random_seed=random_seed,
         is_prokaryote=is_prokaryote)
 
-# if __name__ == '__main__':
-#   flags.mark_flags_as_required([
-#       'fasta_paths',
-#       'output_dir',
-#       'data_dir',
-#       'uniref90_database_path',
-#       'mgnify_database_path',
-#       'template_mmcif_dir',
-#       'max_template_date',
-#       'obsolete_pdbs_path',
-#       'use_gpu_relax',
-#   ])
-
-#   app.run(main)
+if __name__ == '__main__':
