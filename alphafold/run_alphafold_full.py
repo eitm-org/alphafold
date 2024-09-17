@@ -316,15 +316,14 @@ def predict_structure(
       f.write(json.dumps(relax_metrics, indent=4))
       
 
-def run(config_file):
-  conf = OmegaConf.load(config_file)
+def run(conf):
 
   # PRESETS
   db_preset = conf.af2.db_preset
   model_preset = conf.af2.model_preset
 
   # PATH VARIABLES
-  fasta_paths = conf.af2.fasta_paths
+  fasta_paths = os.listdir(conf.af2.fasta_paths)
   data_dir = conf.af2.data_dir
   output_dir = conf.af2.output_dir
 
@@ -370,17 +369,17 @@ def run(config_file):
 
   for tool_name in (
       'jackhmmer', 'hhblits', 'hhsearch', 'hmmsearch', 'hmmbuild', 'kalign'):
-    if not [f'{tool_name}_binary_path'].value:
+    if not [f'{tool_name}_binary_path']:
       raise ValueError(f'Could not find path to the "{tool_name}" binary. Make '
                        'sure it is installed on your system.')
   
   use_small_bfd = (db_preset == 'reduced_dbs')
 
   if use_small_bfd:
-    small_bfd_database_path = conf.af2.small_bfd
+    small_bfd_database_path = data_dir + conf.af2.small_bfd
   else:
-    uniref30_database_path = conf.af2.uniref30
-    bfd_database_path = conf.af2.bfd
+    uniref30_database_path = data_dir + conf.af2.uniref30
+    bfd_database_path = data_dir + conf.af2.bfd
 
   if model_preset == 'monomer_casp14':
     num_ensemble = 8
@@ -485,3 +484,4 @@ def run(config_file):
         models_to_relax=models_to_relax,
         model_type=model_type,
     )
+
