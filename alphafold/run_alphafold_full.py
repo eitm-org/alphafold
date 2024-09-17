@@ -348,10 +348,10 @@ def run(conf):
 
   # MODEL SPECIFICATION
   max_template_date = datetime.today().strftime('%Y-%m-%d')
-  benchmark = False
-  random_seed = None
-  use_precomputed_msas = False
-  use_gpu_relax = None
+  benchmark = conf.af2.benchmark
+  random_seed = conf.af2.random_seed
+  use_precomputed_msas = conf.af2.use_precomputed_msas
+  use_gpu_relax = conf.af2.use_gpu_relax
   model_type = 'Monomer'
 
   # multimer pipeline 
