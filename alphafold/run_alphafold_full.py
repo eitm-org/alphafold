@@ -341,8 +341,10 @@ def run(conf):
   pdb70_database_path = data_dir + conf.af2.pdb70
   template_mmcif_dir = data_dir + conf.af2.pdb_mmcif
   obsolete_pdbs_path = data_dir + conf.af2.obs_pdbs
+  uniref30_database_path = data_dir + conf.af2.uniref30
+  uniprot_database_path = data_dir + conf.af2.uniprot
+  pdb_seqres_database_path = data_dir + conf.af2.pdb_seqres
 
-  uniref30_database_path = None
   small_bfd_database_path = None
   bfd_database_path = None
 
@@ -352,13 +354,14 @@ def run(conf):
   random_seed = conf.af2.random_seed
   use_precomputed_msas = conf.af2.use_precomputed_msas
   use_gpu_relax = conf.af2.use_gpu_relax
-  model_type = 'Monomer'
 
   # multimer pipeline 
-  run_multimer_system = False 
-  num_multimer_predictions_per_model = 0
-  uniprot_database_path = None
-  pdb_seqres_database_path = None
+  run_multimer_system = (model_preset == 'multimer')
+  num_multimer_predictions_per_model = 5
+  # uniprot_database_path = None
+  # pdb_seqres_database_path = None
+
+  model_type = 'Multimer' if run_multimer_system else 'Monomer'
 
   if conf.af2.relax == 'BEST':
     models_to_relax = ModelsToRelax.BEST
